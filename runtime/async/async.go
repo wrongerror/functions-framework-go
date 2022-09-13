@@ -7,8 +7,10 @@ import (
 	"os"
 	"strings"
 
+	daprruntime "github.com/dapr/dapr/pkg/runtime"
 	dapr "github.com/dapr/go-sdk/service/common"
-	daprd "github.com/dapr/go-sdk/service/grpc"
+	grpcsvc "github.com/dapr/go-sdk/service/grpc"
+	httpsvc "github.com/dapr/go-sdk/service/grpc"
 	"k8s.io/klog/v2"
 
 	ofctx "github.com/OpenFunction/functions-framework-go/context"
@@ -19,6 +21,7 @@ import (
 
 const (
 	defaultPattern = "/"
+	protocolEnvVar = "App_Protocol"
 )
 
 type Runtime struct {
@@ -45,11 +48,24 @@ func NewAsyncRuntime(port string, pattern string) (*Runtime, error) {
 			grpcHander: grpcHandler,
 		}, nil
 	}
-	handler, err := daprd.NewService(fmt.Sprintf(":%s", port))
+
+	var newService func(address string) (s dapr.Service, err error)
+	protocol := daprruntime.Protocol(os.Getenv(protocolEnvVar))
+	switch protocol {
+	case daprruntime.HTTPProtocol:
+		newService = httpsvc.NewService
+	case daprruntime.GRPCProtocol:
+		newService = grpcsvc.NewService
+	default:
+		protocol = daprruntime.GRPCProtocol
+		newService = grpcsvc.NewService
+	}
+	handler, err := newService(fmt.Sprintf(":%s", port))
 	if err != nil {
-		klog.Errorf("failed to create dapr grpc service: %v\n", err)
+		klog.Errorf("failed to create dapr %v service: %v\n", protocol, err)
 		return nil, err
 	}
+
 	return &Runtime{
 		port:       port,
 		pattern:    pattern,
@@ -99,13 +115,12 @@ func (r *Runtime) RegisterOpenFunction(
 		// Serving function with inputs
 		if ctx.HasInputs() {
 			for name, input := range ctx.GetInputs() {
-				n := name
 				switch input.GetType() {
 				case ofctx.OpenFuncBinding:
 					input.Uri = input.ComponentName
 					funcErr = r.handler.AddBindingInvocationHandler(input.Uri, func(c context.Context, in *dapr.BindingEvent) (out []byte, err error) {
 						rm := runtime.NewRuntimeManager(ctx, prePlugins, postPlugins)
-						rm.FuncContext.SetEvent(n, in)
+						rm.FuncContext.SetEvent(name, in)
 						rm.FunctionRunWrapperWithHooks(rf.GetOpenFunctionFunction())
 
 						switch rm.FuncOut.GetCode() {
