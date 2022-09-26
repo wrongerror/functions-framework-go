@@ -49,6 +49,7 @@ func Pub(ctx ofctx.Context, in []byte) (ofctx.Out, error) {
 		return ctx.ReturnOnInternalError(), err
 	}
 	klog.Infof("send msg and receive result: %s", string(res))
+	klog.Infof("send msg and receive result: %s", string(res))
 
 	return ctx.ReturnOnSuccess(), nil
 }
